@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XY6020L Remote</title>
+<!-- MQTT over WebSocket — works from ANY browser, anywhere in the world -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#04080f;--card:#0d1520;--card2:#111d2e;
+  --accent:#00e5ff;--green:#00ff9d;--red:#ff3d5a;
+  --orange:#ffaa00;--purple:#c084fc;--yellow:#fde047;
+  --border:#1a3040;--text:#b8d4e8;--dim:#3a5a70;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--text);font-family:'Exo 2',sans-serif;min-height:100vh;padding:16px;
+  background-image:radial-gradient(ellipse at 20% 20%,#001a2a 0%,transparent 60%),
+                   radial-gradient(ellipse at 80% 80%,#001520 0%,transparent 60%);}
+body::after{content:'';position:fixed;inset:0;
+  background-image:linear-gradient(var(--border)18 1px,transparent 1px),
+                   linear-gradient(90deg,var(--border)18 1px,transparent 1px);
+  background-size:32px 32px;pointer-events:none;z-index:0;opacity:.5;}
+.wrap{position:relative;z-index:1;max-width:480px;margin:0 auto;}
+
+/* Header */
+.hdr{margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+.hdr-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;}
+.hdr-title{font-size:18px;font-weight:800;letter-spacing:3px;
+  color:var(--accent);text-transform:uppercase;
+  text-shadow:0 0 20px #00e5ff44;}
+.hdr-sub{font-size:10px;color:var(--dim);font-family:'Share Tech Mono',monospace;margin-top:3px;}
+
+/* Connection status */
+.conn-box{background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;}
+.conn-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:all .3s;}
+.conn-dot.connecting{background:var(--orange);box-shadow:0 0 8px var(--orange);animation:pulse 1s infinite;}
+.conn-dot.connected{background:var(--green);box-shadow:0 0 10px var(--green);}
+.conn-dot.error{background:var(--red);box-shadow:0 0 8px var(--red);animation:none;}
+.conn-text{font-size:12px;font-family:'Share Tech Mono',monospace;flex:1;}
+.conn-topic{font-size:10px;color:var(--dim);margin-top:2px;word-break:break-all;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Topic config */
+.topic-row{display:flex;gap:8px;margin-bottom:16px;align-items:center;}
+.topic-input{flex:1;background:var(--card);border:1px solid var(--border);color:#fff;
+  padding:9px 12px;border-radius:8px;font-family:'Share Tech Mono',monospace;
+  font-size:13px;outline:none;transition:border .2s;}
+.topic-input:focus{border-color:var(--accent);}
+.connect-btn{padding:9px 16px;border-radius:8px;border:none;background:var(--accent);
+  color:#000;font-family:'Exo 2',sans-serif;font-weight:700;font-size:12px;
+  cursor:pointer;white-space:nowrap;transition:all .2s;}
+.connect-btn:hover{opacity:.85;}
+
+/* Last seen */
+.last-seen{font-size:10px;color:var(--dim);font-family:'Share Tech Mono',monospace;
+  text-align:right;margin-bottom:12px;}
+.last-seen span{color:var(--accent);}
+
+/* Meters */
+.meters{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px;}
+@media(min-width:380px){.meters{grid-template-columns:repeat(4,1fr);}}
+.meter{background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:12px 6px;text-align:center;position:relative;overflow:hidden;}
+.meter::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent);}
+.meter.amp::before{background:var(--green);}
+.meter.watt::before{background:var(--orange);}
+.meter.vin::before{background:var(--dim);}
+.meter-val{font-family:'Share Tech Mono',monospace;font-size:20px;font-weight:bold;color:#fff;}
+.meter-unit{font-size:9px;color:var(--dim);margin-top:3px;letter-spacing:1px;}
+.meter-lbl{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:2px;margin-bottom:4px;}
+.ccv{display:inline-block;font-family:'Share Tech Mono',monospace;font-size:8px;
+  padding:2px 5px;border-radius:8px;margin-top:3px;}
+.ccv.cv{background:#00e5ff18;color:var(--accent);border:1px solid #00e5ff33;}
+.ccv.cc{background:#fde04718;color:var(--yellow);border:1px solid #fde04733;}
+
+/* Output toggle */
+.out-row{display:flex;align-items:center;justify-content:space-between;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:12px 16px;margin-bottom:10px;}
+.out-lbl{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;}
+.out-pill{font-family:'Share Tech Mono',monospace;font-size:11px;padding:3px 10px;border-radius:20px;}
+.out-pill.on{background:#00ff9d18;color:var(--green);border:1px solid #00ff9d33;}
+.out-pill.off{background:#ff3d5a18;color:var(--red);border:1px solid #ff3d5a33;}
+.tog-btn{padding:7px 18px;border-radius:7px;border:none;font-family:'Exo 2',sans-serif;
+  font-weight:700;font-size:12px;cursor:pointer;transition:all .2s;}
+.tog-btn.on{background:var(--red);color:#fff;}
+.tog-btn.off{background:var(--green);color:#000;}
+.tog-btn:disabled{opacity:.4;cursor:not-allowed;}
+.tog-btn:hover:not(:disabled){opacity:.85;}
+
+/* Set cards */
+.set-card{background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:14px;margin-bottom:10px;}
+.set-hdr{font-size:10px;text-transform:uppercase;letter-spacing:2px;
+  color:var(--accent);margin-bottom:10px;font-weight:700;}
+.set-hdr.c{color:var(--green);}.set-hdr.t{color:var(--purple);}
+.irow{display:flex;gap:7px;align-items:center;}
+input[type=number]{flex:1;background:var(--bg);border:1px solid var(--border);
+  color:#fff;padding:9px 10px;border-radius:7px;
+  font-family:'Share Tech Mono',monospace;font-size:16px;
+  outline:none;transition:border .2s;min-width:0;}
+input[type=number]:focus{border-color:var(--accent);}
+.ulbl{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--dim);white-space:nowrap;}
+.sbtn{padding:9px 14px;border-radius:7px;border:none;background:var(--accent);
+  color:#000;font-family:'Exo 2',sans-serif;font-weight:700;font-size:12px;
+  cursor:pointer;transition:all .2s;white-space:nowrap;}
+.sbtn:hover{opacity:.85;}.sbtn.c{background:var(--green);}
+.sbtn:disabled{opacity:.4;cursor:not-allowed;}
+.prow{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;}
+.p{padding:4px 9px;border-radius:5px;border:1px solid var(--border);
+  background:transparent;color:var(--dim);font-size:10px;cursor:pointer;
+  font-family:'Share Tech Mono',monospace;transition:all .2s;}
+.p:hover{border-color:var(--accent);color:var(--accent);}
+.p.tp{border-color:#c084fc28;color:#c084fc55;}
+.p.tp:hover{border-color:var(--purple);color:var(--purple);}
+
+/* Timer */
+.tinputs{display:flex;gap:5px;align-items:center;margin-bottom:8px;}
+.tinputs input{flex:1;min-width:0;font-size:18px;padding:9px 5px;text-align:center;}
+.tsep{font-family:'Share Tech Mono',monospace;font-size:18px;color:var(--dim);flex:0 0 auto;}
+.tcol{display:flex;flex-direction:column;flex:1;min-width:0;}
+.tunit{font-size:8px;text-align:center;color:var(--dim);letter-spacing:1px;margin-top:2px;}
+.tbtns{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:8px;}
+.btn-ont{padding:10px 12px;border-radius:7px;border:none;
+  background:linear-gradient(135deg,var(--green),var(--accent));
+  color:#000;font-family:'Exo 2',sans-serif;font-weight:800;font-size:12px;cursor:pointer;transition:all .2s;}
+.btn-ont:hover{opacity:.85;}.btn-ont:disabled{opacity:.4;cursor:not-allowed;}
+.btn-cx{padding:10px 12px;border-radius:7px;background:#ff3d5a18;color:var(--red);
+  border:1px solid #ff3d5a33;font-family:'Exo 2',sans-serif;font-weight:700;
+  font-size:12px;cursor:pointer;white-space:nowrap;}
+.cd-wrap{display:none;margin-top:10px;background:var(--bg);border-radius:7px;padding:10px 12px;}
+.cd-wrap.show{display:block;}
+.cd-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;}
+.cd-lbl{font-size:9px;color:var(--purple);text-transform:uppercase;letter-spacing:1.5px;}
+.cd-t{font-family:'Share Tech Mono',monospace;font-size:20px;color:#fff;letter-spacing:2px;}
+.cd-bg{height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
+.cd-fill{height:100%;background:var(--purple);border-radius:2px;transition:width .98s linear;}
+
+/* Offline overlay */
+.offline-banner{display:none;background:#ff3d5a18;border:1px solid #ff3d5a44;
+  border-radius:8px;padding:10px 14px;margin-bottom:12px;
+  font-size:12px;color:var(--red);font-family:'Share Tech Mono',monospace;text-align:center;}
+.offline-banner.show{display:block;}
+
+/* Toast */
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#1a2a1a;border:1px solid var(--green);color:var(--green);
+  padding:9px 20px;border-radius:8px;font-size:12px;opacity:0;
+  transition:all .3s;pointer-events:none;z-index:99;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.err{background:#2a1a1a;border-color:var(--red);color:var(--red);}
+#toast.info{background:#1a1a2a;border-color:var(--purple);color:var(--purple);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-top">
+      <div>
+        <div class="hdr-title">XY6020L Remote</div>
+        <div class="hdr-sub">Control from anywhere via MQTT</div>
+      </div>
+    </div>
+
+    <!-- Topic config -->
+    <div class="topic-row">
+      <input class="topic-input" type="text" id="topicId"
+             placeholder="your MQTT client ID e.g. xy6020-rajib-001"
+             value="xy6020-rajib-001">
+      <button class="connect-btn" onclick="mqttConnect()">CONNECT</button>
+    </div>
+
+    <!-- Connection status -->
+    <div class="conn-box">
+      <div class="conn-dot connecting" id="connDot"></div>
+      <div>
+        <div class="conn-text" id="connText">Connecting...</div>
+        <div class="conn-topic" id="connTopic"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offline warning -->
+  <div class="offline-banner" id="offlineBanner">
+    ⚠ No data received — device may be offline or wrong topic ID
+  </div>
+
+  <!-- Last seen -->
+  <div class="last-seen">Last update: <span id="lastSeen">—</span></div>
+
+  <!-- Meters -->
+  <div class="meters">
+    <div class="meter">
+      <div class="meter-lbl">Output V</div>
+      <div class="meter-val" id="mv">--.-</div>
+      <div class="meter-unit">VOLTS</div>
+      <div class="ccv cv" id="ccvBadge">CV</div>
+    </div>
+    <div class="meter amp">
+      <div class="meter-lbl">Current</div>
+      <div class="meter-val" id="ma">--.-</div>
+      <div class="meter-unit">AMPS</div>
+    </div>
+    <div class="meter watt">
+      <div class="meter-lbl">Power</div>
+      <div class="meter-val" id="mw">---</div>
+      <div class="meter-unit">WATTS</div>
+    </div>
+    <div class="meter vin">
+      <div class="meter-lbl">Input V</div>
+      <div class="meter-val" id="mvin">--.-</div>
+      <div class="meter-unit">VOLTS</div>
+    </div>
+  </div>
+
+  <!-- Output toggle -->
+  <div class="out-row">
+    <div class="out-lbl">Output</div>
+    <span class="out-pill off" id="outPill">OFF</span>
+    <button class="tog-btn off" id="outBtn" onclick="toggleOutput()" disabled>TURN ON</button>
+  </div>
+
+  <!-- Set Voltage -->
+  <div class="set-card">
+    <div class="set-hdr">⚡ Set Voltage</div>
+    <div class="irow">
+      <input type="number" id="setV" min="0" max="60" step="0.1" value="12.0">
+      <span class="ulbl">V</span>
+      <button class="sbtn" onclick="sendVoltage()" id="btnV" disabled>SET</button>
+    </div>
+    <div class="prow">
+      <button class="p" onclick="setV(3.3)">3.3V</button>
+      <button class="p" onclick="setV(5)">5V</button>
+      <button class="p" onclick="setV(9)">9V</button>
+      <button class="p" onclick="setV(12)">12V</button>
+      <button class="p" onclick="setV(24)">24V</button>
+      <button class="p" onclick="setV(36)">36V</button>
+    </div>
+  </div>
+
+  <!-- Set Current -->
+  <div class="set-card">
+    <div class="set-hdr c">⚡ Set Current Limit</div>
+    <div class="irow">
+      <input type="number" id="setA" min="0" max="20" step="0.1" value="1.0">
+      <span class="ulbl">A</span>
+      <button class="sbtn c" onclick="sendCurrent()" id="btnA" disabled>SET</button>
+    </div>
+    <div class="prow">
+      <button class="p" onclick="setA(0.1)">0.1A</button>
+      <button class="p" onclick="setA(0.5)">0.5A</button>
+      <button class="p" onclick="setA(1)">1A</button>
+      <button class="p" onclick="setA(2)">2A</button>
+      <button class="p" onclick="setA(5)">5A</button>
+      <button class="p" onclick="setA(10)">10A</button>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div class="set-card">
+    <div class="set-hdr t">⏱ Auto-Off Timer</div>
+    <div class="tinputs">
+      <div class="tcol"><input type="number" id="tH" min="0" max="99" value="0"><div class="tunit">HH</div></div>
+      <div class="tsep">:</div>
+      <div class="tcol"><input type="number" id="tM" min="0" max="59" value="0"><div class="tunit">MM</div></div>
+      <div class="tsep">:</div>
+      <div class="tcol"><input type="number" id="tS" min="0" max="59" value="30"><div class="tunit">SS</div></div>
+    </div>
+    <div class="prow">
+      <button class="p tp" onclick="qt(0,0,30)">30s</button>
+      <button class="p tp" onclick="qt(0,1,0)">1m</button>
+      <button class="p tp" onclick="qt(0,5,0)">5m</button>
+      <button class="p tp" onclick="qt(0,15,0)">15m</button>
+      <button class="p tp" onclick="qt(0,30,0)">30m</button>
+      <button class="p tp" onclick="qt(1,0,0)">1h</button>
+    </div>
+    <div class="tbtns">
+      <button class="btn-ont" id="btnTimer" onclick="onAndTimer()" disabled>▶ TURN ON &amp; START TIMER</button>
+      <button class="btn-cx" onclick="cancelTimer()">✕ CANCEL</button>
+    </div>
+    <div class="cd-wrap" id="cdWrap">
+      <div class="cd-top">
+        <span class="cd-lbl">Auto-off in</span>
+        <span class="cd-t" id="cdTime">--:--:--</span>
+      </div>
+      <div class="cd-bg"><div class="cd-fill" id="cdFill" style="width:100%"></div></div>
+    </div>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────
+// Uses HiveMQ public broker over WebSocket — works in any browser
+const BROKER_WS = 'wss://broker.hivemq.com:8884/mqtt';
+
+let client       = null;
+let topicBase    = '';
+let outputOn     = false;
+let timerTotal   = 0;
+let timerRem     = 0;
+let cdTick       = null;
+let lastDataTime = 0;
+let offlineTimer = null;
+
+// ── Toast ─────────────────────────────────────────────
+function showToast(msg,type=''){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='show'+(type?' '+type:'');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.className='',2500);
+}
+
+// ── Format ────────────────────────────────────────────
+function fmt(s){
+  s=Math.max(0,s);
+  return String(Math.floor(s/3600)).padStart(2,'0')+':'+
+         String(Math.floor((s%3600)/60)).padStart(2,'0')+':'+
+         String(s%60).padStart(2,'0');
+}
+
+// ── Connection state UI ───────────────────────────────
+function setConnState(state, detail=''){
+  const dot=document.getElementById('connDot');
+  const txt=document.getElementById('connText');
+  const top=document.getElementById('connTopic');
+  dot.className='conn-dot '+state;
+  const labels={connecting:'Connecting to broker...',connected:'Connected — device live',error:'Connection failed'};
+  txt.textContent=labels[state]||state;
+  top.textContent=detail;
+  // enable/disable controls
+  const ok=(state==='connected');
+  ['outBtn','btnV','btnA','btnTimer'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.disabled=!ok;
+  });
+}
+
+// ── Apply incoming status ─────────────────────────────
+function applyStatus(d){
+  lastDataTime=Date.now();
+  document.getElementById('offlineBanner').className='offline-banner';
+  document.getElementById('lastSeen').textContent=new Date().toLocaleTimeString();
+
+  document.getElementById('mv').textContent   = d.vout.toFixed(2);
+  document.getElementById('ma').textContent   = d.iout.toFixed(2);
+  document.getElementById('mw').textContent   = d.power.toFixed(1);
+  document.getElementById('mvin').textContent = d.vin.toFixed(2);
+
+  const badge=document.getElementById('ccvBadge');
+  badge.textContent=d.cc?'CC':'CV';
+  badge.className='ccv '+(d.cc?'cc':'cv');
+
+  outputOn=d.output;
+  const btn=document.getElementById('outBtn'),pill=document.getElementById('outPill');
+  if(outputOn){btn.textContent='TURN OFF';btn.className='tog-btn on';pill.textContent='ON';pill.className='out-pill on';}
+  else{btn.textContent='TURN ON';btn.className='tog-btn off';pill.textContent='OFF';pill.className='out-pill off';}
+
+  const srv=d.timerRemaining||0;
+  if(srv>0&&outputOn){
+    if(timerTotal===0)timerTotal=srv;
+    if(Math.abs(srv-timerRem)>2)timerRem=srv;
+    startCd();
+  } else if(srv===0&&timerRem>0){
+    timerRem=0;timerTotal=0;stopCd();
+  }
+
+  // Reset offline check
+  clearTimeout(offlineTimer);
+  offlineTimer=setTimeout(()=>{
+    document.getElementById('offlineBanner').className='offline-banner show';
+  }, 10000);
+}
+
+// ── Countdown ─────────────────────────────────────────
+function startCd(){
+  document.getElementById('cdWrap').className='cd-wrap show';
+  if(cdTick)return;
+  cdTick=setInterval(()=>{
+    if(timerRem>0)timerRem--;
+    const pct=timerTotal>0?(timerRem/timerTotal)*100:0;
+    document.getElementById('cdTime').textContent=fmt(timerRem);
+    document.getElementById('cdFill').style.width=pct+'%';
+    if(timerRem<=0){clearInterval(cdTick);cdTick=null;stopCd();}
+  },1000);
+}
+function stopCd(){
+  document.getElementById('cdWrap').className='cd-wrap';
+  if(cdTick){clearInterval(cdTick);cdTick=null;}
+  document.getElementById('cdFill').style.width='100%';
+}
+
+// ── MQTT ─────────────────────────────────────────────
+function mqttConnect(){
+  topicBase=document.getElementById('topicId').value.trim();
+  if(!topicBase){showToast('Enter your device topic ID','err');return;}
+
+  if(client){try{client.end(true);}catch(e){}}
+  setConnState('connecting', topicBase+'/status');
+
+  const clientId='remote-'+Math.random().toString(36).substr(2,8);
+  client=mqtt.connect(BROKER_WS,{clientId,clean:true,reconnectPeriod:3000,connectTimeout:8000});
+
+  client.on('connect',()=>{
+    setConnState('connected', topicBase+'/status');
+    showToast('Connected!');
+    client.subscribe(topicBase+'/status',(err)=>{
+      if(err) showToast('Subscribe failed','err');
+    });
+  });
+
+  client.on('message',(topic,payload)=>{
+    if(topic===topicBase+'/status'){
+      try{ applyStatus(JSON.parse(payload.toString())); }
+      catch(e){ console.warn('Bad JSON',e); }
+    }
+  });
+
+  client.on('error',(err)=>{
+    setConnState('error');
+    showToast('MQTT error','err');
+    console.error(err);
+  });
+
+  client.on('offline',()=>setConnState('connecting','Reconnecting...'));
+  client.on('reconnect',()=>setConnState('connecting','Reconnecting...'));
+
+  // Save topic to localStorage for next visit
+  try{ localStorage.setItem('xy_topic', topicBase); }catch(e){}
+}
+
+// ── Publish command ───────────────────────────────────
+function pub(subtopic, msg){
+  if(!client||!client.connected){showToast('Not connected','err');return false;}
+  client.publish(topicBase+'/cmd/'+subtopic, String(msg));
+  return true;
+}
+
+// ── Controls ──────────────────────────────────────────
+function toggleOutput(){ pub('output', outputOn?'0':'1'); }
+
+function sendVoltage(){
+  const v=parseFloat(document.getElementById('setV').value);
+  if(isNaN(v)||v<0||v>60){showToast('Invalid voltage','err');return;}
+  if(pub('voltage',v.toFixed(2))) showToast('Voltage → '+v.toFixed(2)+'V');
+}
+function sendCurrent(){
+  const a=parseFloat(document.getElementById('setA').value);
+  if(isNaN(a)||a<0||a>20){showToast('Invalid current','err');return;}
+  if(pub('current',a.toFixed(2))) showToast('Current → '+a.toFixed(2)+'A');
+}
+function setV(v){document.getElementById('setV').value=v;sendVoltage();}
+function setA(a){document.getElementById('setA').value=a;sendCurrent();}
+
+function qt(h,m,s){
+  document.getElementById('tH').value=h;
+  document.getElementById('tM').value=m;
+  document.getElementById('tS').value=s;
+}
+function getTimerSec(){
+  return(parseInt(document.getElementById('tH').value)||0)*3600
+        +(parseInt(document.getElementById('tM').value)||0)*60
+        +(parseInt(document.getElementById('tS').value)||0);
+}
+function onAndTimer(){
+  const sec=getTimerSec();
+  if(sec<=0){showToast('Set a time first','err');return;}
+  if(pub('timer',sec)){
+    timerTotal=sec;timerRem=sec;startCd();
+    showToast('ON + timer: '+fmt(sec),'info');
+  }
+}
+function cancelTimer(){
+  timerRem=0;timerTotal=0;stopCd();
+  pub('timer','0');
+  showToast('Timer cancelled');
+}
+
+// ── Auto-connect on load ──────────────────────────────
+window.onload=()=>{
+  try{
+    const saved=localStorage.getItem('xy_topic');
+    if(saved) document.getElementById('topicId').value=saved;
+  }catch(e){}
+  mqttConnect();
+};
+</script>
+</body>
+</html>
